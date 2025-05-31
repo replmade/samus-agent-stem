@@ -36,13 +36,13 @@ class SamusAgent:
         self.mcp_manager = MCPManager(config, self.model_router)
         self.core = MinimalAgentCore(config, self.model_router, self.mcp_manager)
     
-    def process(self, prompt: str) -> AgentResponse:
+    async def process(self, prompt: str) -> AgentResponse:
         """Process a prompt through the agent."""
         start_time = time.time()
         
         try:
             # Use the minimal agent core to solve the problem
-            result = self.core.solve_problem(prompt)
+            result = await self.core.solve_problem(prompt)
             
             execution_time = time.time() - start_time
             
@@ -61,3 +61,7 @@ class SamusAgent:
                 execution_time=execution_time,
                 reasoning_trace=[f"Error: {str(e)}"],
             )
+    
+    async def shutdown(self) -> None:
+        """Shutdown the agent and all its MCPs."""
+        await self.mcp_manager.shutdown()

@@ -4,7 +4,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .config import Config
 
@@ -199,8 +199,16 @@ class MCPManager:
         self.model_router = model_router
         self.generator = MCPGenerator(config, model_router)
         self.repository = MCPRepository(config)
+        
+        # Import here to avoid circular imports
+        from .mcp_codegen import MCPCodeGenerator, MCPValidator
+        from .mcp_executor import MCPExecutor
+        
+        self.code_generator = MCPCodeGenerator(config, model_router)
+        self.validator = MCPValidator()
+        self.executor = MCPExecutor(config)
     
-    def get_or_create_mcp(self, task_context: str) -> MCPSpecification:
+    async def get_or_create_mcp(self, task_context: str) -> MCPSpecification:
         """Get existing MCP or create new one for task."""
         
         # First, try to find existing relevant MCP
@@ -210,27 +218,40 @@ class MCPManager:
             # Return best matching existing MCP
             return existing_mcps[0]
         
-        # Generate new MCP
+        # Generate new MCP specification
         mcp = self.generator.generate_mcp(task_context)
         
-        # Store for future use
+        # Generate the actual code implementation
+        generated_code = self.code_generator.generate_mcp_code(mcp)
+        
+        # Validate the generated code
+        validation_result = self.validator.validate_mcp_code(generated_code)
+        
+        if not validation_result["is_valid"]:
+            # Try to sanitize the code
+            generated_code = self.validator.sanitize_code(generated_code)
+            
+            # Re-validate
+            validation_result = self.validator.validate_mcp_code(generated_code)
+            
+            if not validation_result["is_valid"]:
+                raise RuntimeError(f"Generated MCP code failed validation: {validation_result}")
+        
+        # Save MCP files to filesystem
+        mcp_path = self.code_generator.save_mcp_files(mcp, generated_code)
+        
+        # Store specification in repository
         self.repository.store_mcp(mcp)
         
         return mcp
     
-    def execute_mcp(self, mcp: MCPSpecification, input_data: str) -> str:
+    async def execute_mcp(self, mcp: MCPSpecification, input_data: str, parameters: Optional[Dict] = None) -> Dict[str, Any]:
         """Execute an MCP with given input."""
-        # TODO: Implement actual MCP execution
-        # For now, just use the model router to call the assigned model
-        
-        messages = [{"role": "user", "content": input_data}]
-        system_prompt = mcp.implementation["model_specific_prompts"].get("anthropic", "")
-        
-        return self.model_router.call_model(
-            mcp.model_assignment["default_model"],
-            messages,
-            system_prompt
-        )
+        return await self.executor.execute_mcp(mcp, input_data, parameters)
+    
+    async def shutdown(self) -> None:
+        """Shutdown all MCP processes."""
+        await self.executor.shutdown_all_mcps()
 
 
 class MCPRepository:

@@ -95,15 +95,15 @@ class ModelRouter:
     def _select_lightweight_model(self, capabilities: List[str]) -> str:
         """Select fast, cost-effective models for simple tasks."""
         # For now, default to Claude 3.5 Haiku for lightweight tasks
-        return "claude-3-5-haiku"
+        return "anthropic/claude-3.5-haiku"
     
     def _select_moderate_model(self, capabilities: List[str]) -> str:
         """Balance cost and capability for moderate complexity."""
-        return "claude-sonnet-4"
+        return "anthropic/claude-3.5-sonnet"
     
     def _select_expert_model(self, capabilities: List[str]) -> str:
         """Use most capable models for complex reasoning."""
-        return "claude-opus-4"
+        return "anthropic/claude-3-opus"
     
     def call_model(
         self, 

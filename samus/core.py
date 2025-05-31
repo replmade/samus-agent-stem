@@ -117,7 +117,7 @@ class MinimalAgentCore:
         self.reasoning_engine = ReasoningEngine(config, model_router)
         self.context_manager = ContextManager()
     
-    def solve_problem(self, problem: str) -> ProblemSolution:
+    async def solve_problem(self, problem: str) -> ProblemSolution:
         """Solve a problem using direct reasoning and dynamic MCP generation."""
         
         # Get context from previous interactions
@@ -126,10 +126,117 @@ class MinimalAgentCore:
         # First, try direct reasoning
         solution = self.reasoning_engine.process(problem, context)
         
-        # TODO: Analyze solution for MCP generation needs
-        # This will be implemented when MCP framework is ready
+        # Analyze if we need to generate and execute MCPs
+        mcp_needs = await self._analyze_mcp_needs(problem, solution)
+        
+        if mcp_needs:
+            # Generate and execute MCPs to enhance the solution
+            enhanced_solution = await self._execute_mcps(problem, solution, mcp_needs)
+            solution = enhanced_solution
         
         # Add interaction to context
         self.context_manager.add_interaction(problem, solution)
         
         return solution
+    
+    async def _analyze_mcp_needs(self, problem: str, solution: ProblemSolution) -> List[str]:
+        """Analyze if MCPs are needed to enhance the solution."""
+        
+        # Use the reasoning engine to determine if MCPs are needed
+        analysis_prompt = f"""Given this problem and initial solution, determine if specialized MCPs are needed:
+
+Problem: {problem}
+
+Initial Solution: {solution.content}
+
+Should I generate specialized MCPs to enhance this solution? Consider:
+1. Does this require external data collection?
+2. Does this need specialized analysis capabilities?
+3. Would custom tools improve the solution quality?
+4. Are there repetitive tasks that could be automated?
+
+Respond with JSON format:
+{{
+    "needs_mcps": true/false,
+    "mcp_requirements": ["description1", "description2"],
+    "reasoning": "explanation"
+}}"""
+        
+        response = self.reasoning_engine.model_router.call_model(
+            model=self.reasoning_engine.model,
+            messages=[{"role": "user", "content": analysis_prompt}],
+            system="You are an expert at identifying when specialized capabilities are needed.",
+            max_tokens=1024,
+            temperature=0.1
+        )
+        
+        try:
+            import json
+            
+            # Extract JSON from markdown code blocks if present
+            if "```json" in response:
+                start = response.find("```json") + 7
+                end = response.find("```", start)
+                json_str = response[start:end].strip()
+            else:
+                json_str = response.strip()
+            
+            analysis = json.loads(json_str)
+            if analysis.get("needs_mcps", False):
+                requirements = analysis.get("mcp_requirements", [])
+                return requirements
+        except json.JSONDecodeError as e:
+            pass  # If we can't parse the response, assume no MCPs needed
+        
+        return []
+    
+    async def _execute_mcps(self, problem: str, solution: ProblemSolution, mcp_needs: List[str]) -> ProblemSolution:
+        """Execute MCPs to enhance the solution."""
+        
+        enhanced_content = solution.content
+        mcps_used = []
+        reasoning_trace = solution.reasoning_trace.copy()
+        
+        for mcp_requirement in mcp_needs:
+            try:
+                # Generate or retrieve MCP for this requirement
+                mcp = await self.mcp_manager.get_or_create_mcp(mcp_requirement)
+                
+                # Execute the MCP with the problem context
+                mcp_result = await self.mcp_manager.execute_mcp(
+                    mcp, 
+                    f"Problem: {problem}\nCurrent Solution: {enhanced_content}",
+                    {"requirement": mcp_requirement}
+                )
+                
+                if mcp_result["success"]:
+                    # Integrate MCP result into the solution
+                    integration_prompt = f"""Integrate this MCP result into the existing solution:
+
+Original Solution: {enhanced_content}
+
+MCP Result: {mcp_result['result']}
+
+MCP Purpose: {mcp_requirement}
+
+Provide an enhanced, integrated solution:"""
+                    
+                    enhanced_content = self.reasoning_engine.model_router.call_model(
+                        model=self.reasoning_engine.model,
+                        messages=[{"role": "user", "content": integration_prompt}],
+                        system="Integrate the MCP results seamlessly into the solution.",
+                        max_tokens=4096,
+                        temperature=0.1
+                    )
+                    
+                    mcps_used.append(mcp.mcp_id)
+                    reasoning_trace.append(f"Enhanced with MCP: {mcp.name}")
+                
+            except Exception as e:
+                reasoning_trace.append(f"MCP execution failed for '{mcp_requirement}': {str(e)}")
+        
+        return ProblemSolution(
+            content=enhanced_content,
+            mcps_used=mcps_used,
+            reasoning_trace=reasoning_trace
+        )

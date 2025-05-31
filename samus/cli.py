@@ -1,5 +1,6 @@
 """CLI interface for Samus agent."""
 
+import asyncio
 import sys
 from pathlib import Path
 from typing import Optional
@@ -38,12 +39,12 @@ def main(
     
     try:
         if interactive:
-            _run_interactive_session(agent, verbose)
+            asyncio.run(_run_interactive_session(agent, verbose))
         elif file:
             prompt_text = Path(file).read_text().strip()
-            _run_single_prompt(agent, prompt_text, verbose)
+            asyncio.run(_run_single_prompt(agent, prompt_text, verbose))
         elif prompt:
-            _run_single_prompt(agent, prompt, verbose)
+            asyncio.run(_run_single_prompt(agent, prompt, verbose))
         else:
             click.echo("Error: Must provide a prompt, file, or use interactive mode")
             sys.exit(1)
@@ -55,43 +56,53 @@ def main(
         sys.exit(1)
 
 
-def _run_single_prompt(agent: SamusAgent, prompt: str, verbose: bool) -> None:
+async def _run_single_prompt(agent: SamusAgent, prompt: str, verbose: bool) -> None:
     """Run a single prompt through the agent."""
     if verbose:
         click.echo(f"Processing: {prompt[:100]}...")
     
-    result = agent.process(prompt)
-    click.echo(result.content)
-    
-    if verbose:
-        click.echo(f"\nUsed MCPs: {', '.join(result.mcps_used)}")
-        click.echo(f"Execution time: {result.execution_time:.2f}s")
+    try:
+        result = await agent.process(prompt)
+        click.echo(result.content)
+        
+        if verbose:
+            click.echo(f"\nUsed MCPs: {', '.join(result.mcps_used)}")
+            click.echo(f"Execution time: {result.execution_time:.2f}s")
+            if result.reasoning_trace:
+                click.echo(f"Reasoning trace: {', '.join(result.reasoning_trace)}")
+    finally:
+        await agent.shutdown()
 
 
-def _run_interactive_session(agent: SamusAgent, verbose: bool) -> None:
+async def _run_interactive_session(agent: SamusAgent, verbose: bool) -> None:
     """Run an interactive session with the agent."""
     click.echo("Samus Agent Interactive Session")
     click.echo("Type 'exit' or 'quit' to end the session\n")
     
-    while True:
-        try:
-            prompt = click.prompt("samus>", type=str)
-            
-            if prompt.lower() in ["exit", "quit"]:
+    try:
+        while True:
+            try:
+                prompt = click.prompt("samus>", type=str)
+                
+                if prompt.lower() in ["exit", "quit"]:
+                    break
+                    
+                if not prompt.strip():
+                    continue
+                    
+                result = await agent.process(prompt)
+                click.echo(f"\n{result.content}\n")
+                
+                if verbose:
+                    click.echo(f"Used MCPs: {', '.join(result.mcps_used)}")
+                    click.echo(f"Execution time: {result.execution_time:.2f}s")
+                    if result.reasoning_trace:
+                        click.echo(f"Reasoning trace: {', '.join(result.reasoning_trace)}\n")
+                    
+            except (EOFError, KeyboardInterrupt):
                 break
-                
-            if not prompt.strip():
-                continue
-                
-            result = agent.process(prompt)
-            click.echo(f"\n{result.content}\n")
-            
-            if verbose:
-                click.echo(f"Used MCPs: {', '.join(result.mcps_used)}")
-                click.echo(f"Execution time: {result.execution_time:.2f}s\n")
-                
-        except (EOFError, KeyboardInterrupt):
-            break
+    finally:
+        await agent.shutdown()
 
 
 if __name__ == "__main__":
