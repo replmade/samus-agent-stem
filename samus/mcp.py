@@ -298,3 +298,21 @@ class MCPRepository:
             data = json.load(f)
         
         return MCPSpecification(**data)
+    
+    def get_all_mcps(self) -> List[MCPSpecification]:
+        """Get all stored MCPs."""
+        mcps = []
+        
+        if not self.storage_path.exists():
+            return mcps
+        
+        for mcp_file in self.storage_path.glob("*.json"):
+            try:
+                with open(mcp_file, 'r') as f:
+                    data = json.load(f)
+                mcp = MCPSpecification(**data)
+                mcps.append(mcp)
+            except Exception as e:
+                print(f"Error loading MCP from {mcp_file}: {str(e)}")
+        
+        return mcps

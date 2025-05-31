@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "export_date": 1748667784.166441,
+  "mcps": [
+    {
+      "mcp_id": "74f02a05-e4a7-43af-bc1d-12db7d45aad8",
+      "version": "1.0.0",
+      "name": "dynamic_capability_106c23e6_adapted",
+      "description": "Adapted version of: Generated capability for: Code execution environment with Python interpreter for running mathematical calculations",
+      "model_assignment": {
+        "default_model": "anthropic/claude-3.5-haiku",
+        "provider": "anthropic",
+        "complexity_tier": "lightweight",
+        "cost_optimization": true,
+        "fallback_models": [
+          "anthropic/claude-3.5-sonnet"
+        ],
+        "reasoning_requirements": "advanced",
+        "performance_profile": {
+          "avg_tokens": 150,
+          "avg_latency_ms": 800,
+          "success_rate_by_model": {}
+        }
+      },
+      "requirements": {
+        "input_format": "text",
+        "output_format": "text",
+        "context_requirements": [
+          "general_reasoning"
+        ],
+        "computational_complexity": "moderate",
+        "reasoning_depth": "advanced"
+      },
+      "implementation": {
+        "protocol_steps": [
+          "analyze_input",
+          "process_requirements",
+          "generate_solution",
+          "validate_output"
+        ],
+        "resource_endpoints": [],
+        "validation_rules": [],
+        "model_specific_prompts": {
+          "anthropic": "Process this task: Code execution environment with Python interpreter for running mathematical calculations"
+        }
+      },
+      "performance_metrics": {
+        "success_rate": 0.0,
+        "execution_time": 0.0,
+        "resource_usage": "unknown",
+        "cost_per_execution": 0.0,
+        "model_efficiency_scores": {},
+        "transferred_from": "106c23e6-caad-4764-9e64-8ab2d1fb1419",
+        "adaptation_date": 1748667784.158476,
+        "inherited": true,
+        "inheritance_date": 1748667784.162519
+      },
+      "evolution_history": [
+        {
+          "version": "1.0.0",
+          "changes": "initial_implementation",
+          "performance_delta": 0.0,
+          "model_changes": "assigned_default_anthropic/claude-3.5-sonnet"
+        },
+        {
+          "version": "1.0.0-adapted",
+          "changes": "adapted_for_model_anthropic/claude-3.5-haiku",
+          "performance_delta": 0.0,
+          "model_changes": "adapted_from_anthropic/claude-3.5-sonnet_to_anthropic/claude-3.5-haiku",
+          "source_mcp": "106c23e6-caad-4764-9e64-8ab2d1fb1419"
+        }
+      ]
+    }
+  ]
+}
