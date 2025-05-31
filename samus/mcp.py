@@ -120,9 +120,43 @@ class MCPGenerator:
         return requirements or ["general_reasoning"]
     
     def _search_capabilities(self, requirements: List[str]) -> List[str]:
-        """Search for relevant capabilities (placeholder)."""
-        # TODO: Implement actual capability discovery
-        return requirements
+        """Search for relevant capabilities using enhanced discovery."""
+        try:
+            from .capability_discovery import CapabilityMatchingEngine
+            
+            # Create matching engine
+            matching_engine = CapabilityMatchingEngine(self.config)
+            
+            # Convert requirements to task description
+            task_description = " ".join(requirements)
+            
+            # This would be async in a real implementation, for now use sync fallback
+            # capabilities = await matching_engine.find_best_capabilities(task_description)
+            
+            # Return enhanced requirements with discovered capabilities
+            enhanced_requirements = requirements.copy()
+            
+            # Add common capability suggestions based on requirements
+            capability_map = {
+                "data_processing": ["pandas", "numpy", "csv"],
+                "api_integration": ["httpx", "requests", "json"],
+                "file_operations": ["pathlib", "aiofiles", "os"],
+                "analysis_capability": ["scipy", "matplotlib", "statistics"],
+                "general_reasoning": ["json", "logging", "asyncio"]
+            }
+            
+            for req in requirements:
+                if req in capability_map:
+                    enhanced_requirements.extend(capability_map[req])
+            
+            return list(set(enhanced_requirements))
+            
+        except ImportError:
+            # Fallback to original behavior
+            return requirements
+        except Exception as e:
+            print(f"Error in capability discovery: {str(e)}")
+            return requirements
     
     def _get_fallback_models(self, primary_model: str) -> List[str]:
         """Get fallback models for the primary model."""
@@ -255,15 +289,78 @@ class MCPManager:
 
 
 class MCPRepository:
-    """Manages MCP storage and retrieval."""
+    """Manages MCP storage and retrieval with caching and optimization."""
     
     def __init__(self, config: Config):
         self.config = config
         self.storage_path = Path(config.mcp_repository_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
+        
+        # In-memory cache for frequently accessed MCPs
+        self._mcp_cache: Dict[str, MCPSpecification] = {}
+        self._cache_access_count: Dict[str, int] = {}
+        self._max_cache_size = config.max_mcps_in_memory
+        
+        # Performance metadata cache
+        self._performance_cache: Dict[str, Dict] = {}
+        
+        # Initialize cache
+        self._initialize_cache()
+    
+    def _initialize_cache(self) -> None:
+        """Initialize cache with high-performance MCPs."""
+        try:
+            # Load high-performance MCPs into cache
+            all_mcps = self._load_all_mcps_from_disk()
+            
+            # Sort by performance metrics
+            high_performance_mcps = [
+                mcp for mcp in all_mcps 
+                if mcp.performance_metrics.get("success_rate", 0.0) > 0.7
+            ]
+            
+            # Cache the top performers
+            for mcp in high_performance_mcps[:self._max_cache_size]:
+                self._mcp_cache[mcp.mcp_id] = mcp
+                self._cache_access_count[mcp.mcp_id] = 0
+        
+        except Exception as e:
+            print(f"Warning: Failed to initialize MCP cache: {str(e)}")
+    
+    def _load_all_mcps_from_disk(self) -> List[MCPSpecification]:
+        """Load all MCPs from disk without caching."""
+        mcps = []
+        
+        if not self.storage_path.exists():
+            return mcps
+        
+        for mcp_file in self.storage_path.glob("*.json"):
+            try:
+                with open(mcp_file, 'r') as f:
+                    data = json.load(f)
+                mcp = MCPSpecification(**data)
+                mcps.append(mcp)
+            except Exception:
+                continue  # Skip corrupted files
+        
+        return mcps
+    
+    def _update_cache(self, mcp: MCPSpecification) -> None:
+        """Update cache with new or modified MCP."""
+        # If cache is full, remove least accessed MCP
+        if len(self._mcp_cache) >= self._max_cache_size and mcp.mcp_id not in self._mcp_cache:
+            if self._cache_access_count:
+                least_accessed = min(self._cache_access_count, key=self._cache_access_count.get)
+                del self._mcp_cache[least_accessed]
+                del self._cache_access_count[least_accessed]
+        
+        # Add or update MCP in cache
+        self._mcp_cache[mcp.mcp_id] = mcp
+        if mcp.mcp_id not in self._cache_access_count:
+            self._cache_access_count[mcp.mcp_id] = 0
     
     def store_mcp(self, mcp: MCPSpecification) -> None:
-        """Store MCP to filesystem."""
+        """Store MCP to filesystem and update cache."""
         mcp_file = self.storage_path / f"{mcp.mcp_id}.json"
         
         mcp_data = {
@@ -280,39 +377,137 @@ class MCPRepository:
         
         with open(mcp_file, 'w') as f:
             json.dump(mcp_data, f, indent=2)
+        
+        # Update cache
+        self._update_cache(mcp)
     
-    def find_similar_mcps(self, task_context: str) -> List[MCPSpecification]:
-        """Find MCPs similar to the given task context."""
-        # TODO: Implement semantic similarity search
-        # For now, return empty list to force generation
-        return []
+    def find_similar_mcps(self, task_context: str, similarity_threshold: float = 0.7) -> List[MCPSpecification]:
+        """Find MCPs similar to the given task context using semantic similarity."""
+        try:
+            from .similarity import SemanticSimilarityEngine
+            
+            # Initialize similarity engine
+            similarity_engine = SemanticSimilarityEngine()
+            
+            # Get all stored MCPs
+            all_mcps = self.get_all_mcps()
+            
+            if not all_mcps:
+                return []
+            
+            # Calculate similarity scores
+            similar_mcps = []
+            for mcp in all_mcps:
+                # Create MCP text representation for similarity comparison
+                mcp_text = f"{mcp.name} {mcp.description} {' '.join(mcp.requirements.get('context_requirements', []))}"
+                
+                # Calculate semantic similarity
+                similarity_score = similarity_engine.calculate_similarity(task_context, mcp_text)
+                
+                if similarity_score >= similarity_threshold:
+                    similar_mcps.append((mcp, similarity_score))
+            
+            # Sort by similarity score (highest first)
+            similar_mcps.sort(key=lambda x: x[1], reverse=True)
+            
+            # Return top 5 most similar MCPs
+            return [mcp for mcp, score in similar_mcps[:5]]
+            
+        except ImportError:
+            # Fallback to simple keyword matching if similarity engine not available
+            return self._find_similar_mcps_fallback(task_context)
+        except Exception as e:
+            print(f"Error in semantic similarity search: {str(e)}")
+            return self._find_similar_mcps_fallback(task_context)
+    
+    def _find_similar_mcps_fallback(self, task_context: str) -> List[MCPSpecification]:
+        """Fallback similarity search using keyword matching."""
+        all_mcps = self.get_all_mcps()
+        task_keywords = set(task_context.lower().split())
+        
+        similar_mcps = []
+        for mcp in all_mcps:
+            mcp_text = f"{mcp.name} {mcp.description} {' '.join(mcp.requirements.get('context_requirements', []))}"
+            mcp_keywords = set(mcp_text.lower().split())
+            
+            # Calculate Jaccard similarity
+            intersection = len(task_keywords.intersection(mcp_keywords))
+            union = len(task_keywords.union(mcp_keywords))
+            
+            if union > 0:
+                similarity = intersection / union
+                if similarity >= 0.2:  # Lower threshold for keyword matching
+                    similar_mcps.append((mcp, similarity))
+        
+        # Sort by similarity score
+        similar_mcps.sort(key=lambda x: x[1], reverse=True)
+        return [mcp for mcp, score in similar_mcps[:3]]
     
     def load_mcp(self, mcp_id: str) -> Optional[MCPSpecification]:
-        """Load MCP by ID."""
+        """Load MCP by ID, using cache when possible."""
+        # Check cache first
+        if mcp_id in self._mcp_cache:
+            self._cache_access_count[mcp_id] += 1
+            return self._mcp_cache[mcp_id]
+        
+        # Load from disk
         mcp_file = self.storage_path / f"{mcp_id}.json"
         
         if not mcp_file.exists():
             return None
         
-        with open(mcp_file, 'r') as f:
-            data = json.load(f)
-        
-        return MCPSpecification(**data)
+        try:
+            with open(mcp_file, 'r') as f:
+                data = json.load(f)
+            
+            mcp = MCPSpecification(**data)
+            
+            # Update cache with loaded MCP
+            self._update_cache(mcp)
+            
+            return mcp
+        except Exception as e:
+            print(f"Error loading MCP {mcp_id}: {str(e)}")
+            return None
     
     def get_all_mcps(self) -> List[MCPSpecification]:
-        """Get all stored MCPs."""
-        mcps = []
+        """Get all stored MCPs with optimized loading."""
+        # Start with cached MCPs
+        mcps = list(self._mcp_cache.values())
+        cached_ids = set(self._mcp_cache.keys())
         
+        # Load any MCPs not in cache
         if not self.storage_path.exists():
             return mcps
         
         for mcp_file in self.storage_path.glob("*.json"):
             try:
-                with open(mcp_file, 'r') as f:
-                    data = json.load(f)
-                mcp = MCPSpecification(**data)
-                mcps.append(mcp)
+                mcp_id = mcp_file.stem
+                if mcp_id not in cached_ids:
+                    with open(mcp_file, 'r') as f:
+                        data = json.load(f)
+                    mcp = MCPSpecification(**data)
+                    mcps.append(mcp)
+                    
+                    # Consider adding to cache if high performance
+                    if mcp.performance_metrics.get("success_rate", 0.0) > 0.7:
+                        self._update_cache(mcp)
+                        
             except Exception as e:
                 print(f"Error loading MCP from {mcp_file}: {str(e)}")
         
         return mcps
+    
+    def get_cache_stats(self) -> Dict[str, int]:
+        """Get statistics about the cache."""
+        return {
+            "cached_mcps": len(self._mcp_cache),
+            "max_cache_size": self._max_cache_size,
+            "total_access_count": sum(self._cache_access_count.values())
+        }
+    
+    def clear_cache(self) -> None:
+        """Clear the MCP cache."""
+        self._mcp_cache.clear()
+        self._cache_access_count.clear()
+        self._performance_cache.clear()

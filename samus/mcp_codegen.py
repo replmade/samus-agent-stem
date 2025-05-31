@@ -224,21 +224,37 @@ import asyncio
 import json
 import logging
 import sys
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import mcp.types as types
-from mcp import ClientSession, StdioServerParameters
-from mcp.server import NotificationOptions, Server
-from mcp.server.models import InitializationOptions
-from pydantic import BaseModel
+# Simple standalone MCP implementation for compatibility
+class SimpleServer:
+    def __init__(self, name):
+        self.name = name
+        self.tools = []
+        
+    def list_tools(self):
+        def decorator(func):
+            self.tools.append(func)
+            return func
+        return decorator
+        
+    def call_tool(self):
+        def decorator(func):
+            self.call_tool_handler = func
+            return func
+        return decorator
 
 # Configure logging
+log_dir = Path('logs')
+log_dir.mkdir(exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/mcp_server.log'),
+        logging.FileHandler(log_dir / 'mcp_server.log'),
         logging.StreamHandler()
     ]
 )
@@ -248,21 +264,21 @@ logger = logging.getLogger(__name__)
 SERVER_NAME = "{spec.name}"
 SERVER_VERSION = "{spec.version}"
 
-# Initialize MCP Server
-server = Server(SERVER_NAME)
+# Initialize Simple Server
+server = SimpleServer(SERVER_NAME)
 
 # === GENERATED IMPLEMENTATION ===
 {implementation_code}
 # === END GENERATED IMPLEMENTATION ===
 
 @server.list_tools()
-async def handle_list_tools() -> list[types.Tool]:
+async def handle_list_tools():
     """List available tools for this MCP server."""
     return [
-        types.Tool(
-            name="{spec.mcp_id}_execute",
-            description="{spec.description}",
-            inputSchema={{
+        {{
+            "name": "{spec.mcp_id}_execute",
+            "description": "{spec.description}",
+            "inputSchema": {{
                 "type": "object",
                 "properties": {{
                     "input_data": {{
@@ -276,11 +292,11 @@ async def handle_list_tools() -> list[types.Tool]:
                 }},
                 "required": ["input_data"]
             }}
-        )
+        }}
     ]
 
 @server.call_tool()
-async def handle_call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
+async def handle_call_tool(name: str, arguments: dict = None):
     """Handle tool execution requests."""
     try:
         if name == "{spec.mcp_id}_execute":
@@ -290,43 +306,49 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
             # Call the generated implementation
             result = await execute_capability(input_data, parameters)
             
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(result, indent=2)
-                )
-            ]
+            return [{{
+                "type": "text",
+                "text": json.dumps(result, indent=2)
+            }}]
         else:
             raise ValueError(f"Unknown tool: {{name}}")
             
     except Exception as e:
         logger.error(f"Error executing tool {{name}}: {{str(e)}}")
-        return [
-            types.TextContent(
-                type="text", 
-                text=f"Error: {{str(e)}}"
-            )
-        ]
+        return [{{
+            "type": "text", 
+            "text": f"Error: {{str(e)}}"
+        }}]
+
+async def execute_main(input_data: str, parameters: dict = None):
+    """Main execution function that can be called directly."""
+    try:
+        return await execute_capability(input_data, parameters or {{}})
+    except Exception as e:
+        logger.error(f"Execution error: {{str(e)}}")
+        return {{"success": False, "error": str(e)}}
 
 async def main():
-    """Main entry point for the MCP server."""
-    from mcp.server.stdio import stdio_server
+    """Main entry point for standalone execution."""
+    logger.info(f"Starting {{SERVER_NAME}} v{{SERVER_VERSION}} in standalone mode")
     
-    logger.info(f"Starting {{SERVER_NAME}} v{{SERVER_VERSION}}")
+    # Get parameters from environment if available
+    parameters = {{}}
+    if "MCP_PARAMETERS" in os.environ:
+        try:
+            parameters = json.loads(os.environ["MCP_PARAMETERS"])
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse MCP_PARAMETERS from environment")
     
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name=SERVER_NAME,
-                server_version=SERVER_VERSION,
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={{}}
-                )
-            )
-        )
+    # For standalone testing - read from stdin or command line
+    if len(sys.argv) > 1:
+        input_data = " ".join(sys.argv[1:])
+        result = await execute_main(input_data, parameters)
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"{{SERVER_NAME}} MCP Server")
+        print(f"Usage: python server.py <input_data>")
+        print(f"Description: {{spec.description}}")
 
 if __name__ == "__main__":
     asyncio.run(main())

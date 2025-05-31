@@ -28,16 +28,13 @@ class MCPExecutor:
         input_data: str, 
         parameters: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Execute an MCP with the given input data."""
+        """Execute an MCP with the given input data using direct execution."""
         
         start_time = time.time()
         
         try:
-            # Get or start MCP process
-            mcp_process = await self._get_or_start_mcp(spec)
-            
-            # Execute the capability
-            result = await mcp_process.execute(input_data, parameters or {})
+            # Execute using simplified direct approach
+            result = await self._execute_direct(spec, input_data, parameters or {})
             
             execution_time = time.time() - start_time
             
@@ -64,6 +61,60 @@ class MCPExecutor:
                 "execution_time": execution_time,
                 "mcp_id": spec.mcp_id
             }
+    
+    async def _execute_direct(self, spec: MCPSpecification, input_data: str, parameters: Dict) -> Dict[str, Any]:
+        """Execute MCP using direct Python subprocess execution."""
+        
+        # Get the MCP server file path
+        mcp_path = Path(self.config.mcp_repository_path) / spec.mcp_id / "server.py"
+        
+        if not mcp_path.exists():
+            raise RuntimeError(f"MCP server file not found: {mcp_path}")
+        
+        # Prepare execution arguments
+        cmd = [
+            sys.executable,
+            str(mcp_path),
+            input_data
+        ]
+        
+        # Set environment variables for parameters
+        env = os.environ.copy()
+        env["MCP_PARAMETERS"] = json.dumps(parameters)
+        
+        try:
+            # Execute the MCP server
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                cwd=mcp_path.parent
+            )
+            
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), 
+                timeout=30.0  # 30 second timeout
+            )
+            
+            if process.returncode != 0:
+                error_msg = stderr.decode() if stderr else "Unknown error"
+                raise RuntimeError(f"MCP execution failed: {error_msg}")
+            
+            # Parse the result
+            output = stdout.decode().strip()
+            if output:
+                try:
+                    return json.loads(output)
+                except json.JSONDecodeError:
+                    return {"success": True, "data": output}
+            else:
+                return {"success": True, "data": "No output"}
+                
+        except asyncio.TimeoutError:
+            raise RuntimeError("MCP execution timed out")
+        except Exception as e:
+            raise RuntimeError(f"MCP execution error: {str(e)}")
     
     async def _get_or_start_mcp(self, spec: MCPSpecification) -> "MCPProcess":
         """Get existing MCP process or start a new one."""
@@ -116,6 +167,9 @@ class MCPExecutor:
         
         # Save updated specification
         await self._save_updated_spec(spec)
+        
+        # Also update in the main repository
+        await self._update_repository_metrics(spec)
     
     async def _save_updated_spec(self, spec: MCPSpecification) -> None:
         """Save updated specification with performance metrics."""
@@ -136,6 +190,15 @@ class MCPExecutor:
             
             with open(spec_file, 'w') as f:
                 json.dump(spec_data, f, indent=2)
+    
+    async def _update_repository_metrics(self, spec: MCPSpecification) -> None:
+        """Update metrics in the main MCP repository."""
+        try:
+            from .mcp import MCPRepository
+            repository = MCPRepository(self.config)
+            repository.store_mcp(spec)  # This will update the existing MCP
+        except Exception as e:
+            self.logger.warning(f"Failed to update repository metrics: {str(e)}")
     
     async def shutdown_all_mcps(self) -> None:
         """Shutdown all active MCP processes."""

@@ -23,6 +23,7 @@ class Config(BaseModel):
     
     # MCP Configuration
     mcp_repository_path: str = Field(default_factory=lambda: str(Path.home() / ".samus" / "mcps"))
+    data_directory: str = Field(default_factory=lambda: str(Path.home() / ".samus" / "data"))
     max_mcps_in_memory: int = 50
     mcp_cache_ttl: int = 3600  # seconds
     
@@ -60,3 +61,4 @@ class Config(BaseModel):
     def ensure_directories(self) -> None:
         """Ensure required directories exist."""
         Path(self.mcp_repository_path).mkdir(parents=True, exist_ok=True)
+        Path(self.data_directory).mkdir(parents=True, exist_ok=True)
