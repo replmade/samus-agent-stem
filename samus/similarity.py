@@ -35,23 +35,37 @@ class SemanticSimilarityEngine:
         self._initialize_model()
     
     def _initialize_model(self) -> None:
-        """Initialize the sentence transformer model."""
+        """Initialize the sentence transformer model lazily."""
         if not HAS_SENTENCE_TRANSFORMERS:
             self.logger.warning("sentence-transformers not available, using fallback similarity")
             return
         
-        try:
-            # Use a lightweight, fast model for embedding
-            model_name = "all-MiniLM-L6-v2"  # Good balance of speed and quality
-            self.model = SentenceTransformer(model_name)
-            self.logger.info(f"Initialized semantic similarity model: {model_name}")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize embedding model: {str(e)}")
-            self.model = None
+        # Don't initialize the model immediately - do it lazily on first use
+        # This prevents blocking the startup process
+        self.logger.info("Semantic similarity engine ready (model will load on first use)")
+        
+    def _get_model(self):
+        """Get the model, initializing it if needed (lazy loading)."""
+        if not HAS_SENTENCE_TRANSFORMERS:
+            return None
+            
+        if self.model is None:
+            try:
+                # Use a lightweight, fast model for embedding
+                model_name = "all-MiniLM-L6-v2"  # Good balance of speed and quality
+                self.logger.info(f"Loading semantic similarity model: {model_name} (this may take a moment on first use)")
+                self.model = SentenceTransformer(model_name)
+                self.logger.info(f"Successfully loaded semantic similarity model: {model_name}")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize embedding model: {str(e)}")
+                self.model = False  # Use False to indicate failed initialization
+                
+        return self.model if self.model is not False else None
     
     def calculate_similarity(self, text1: str, text2: str) -> float:
         """Calculate semantic similarity between two text strings."""
-        if not self.model:
+        model = self._get_model()
+        if not model:
             # Fallback to simple text overlap similarity
             return self._calculate_text_overlap_similarity(text1, text2)
         
@@ -76,8 +90,13 @@ class SemanticSimilarityEngine:
         if text_hash in self.embeddings_cache:
             return self.embeddings_cache[text_hash]
         
+        # Get model (lazy loading)
+        model = self._get_model()
+        if not model:
+            raise RuntimeError("Model not available for embedding generation")
+        
         # Generate new embedding
-        embedding = self.model.encode([text])[0]
+        embedding = model.encode([text])[0]
         
         # Cache the embedding
         self.embeddings_cache[text_hash] = embedding

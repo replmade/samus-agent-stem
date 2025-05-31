@@ -40,6 +40,11 @@ class Config(BaseModel):
     log_level: str = "INFO"
     enable_performance_tracking: bool = True
     
+    # MCP Generation Control
+    enable_mcp_generation: bool = True
+    mcp_generation_timeout: float = 60.0
+    mcp_execution_timeout: float = 30.0
+    
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "Config":
         """Load configuration from file or environment."""

@@ -161,11 +161,29 @@ class MCPGenerator:
     def _get_fallback_models(self, primary_model: str) -> List[str]:
         """Get fallback models for the primary model."""
         fallback_map = {
-            "claude-3-5-haiku": ["claude-sonnet-4"],
-            "claude-sonnet-4": ["claude-3-5-haiku", "claude-opus-4"],
-            "claude-opus-4": ["claude-sonnet-4"]
+            # Anthropic models
+            "anthropic/claude-3.5-haiku": ["anthropic/claude-3.5-sonnet", "google/gemini-2.0-flash"],
+            "anthropic/claude-3.5-sonnet": ["anthropic/claude-sonnet-4", "anthropic/claude-3.5-haiku"],
+            "anthropic/claude-3.7-sonnet": ["anthropic/claude-sonnet-4", "anthropic/claude-3.5-sonnet"],
+            "anthropic/claude-sonnet-4": ["anthropic/claude-3.7-sonnet", "anthropic/claude-3.5-sonnet"],
+            "anthropic/claude-opus-4": ["anthropic/claude-sonnet-4", "openai/o1"],
+            "anthropic/claude-3-opus": ["anthropic/claude-opus-4", "openai/o1"],
+            
+            # OpenAI models
+            "openai/gpt-4o-mini": ["google/gemini-2.0-flash", "anthropic/claude-3.5-haiku"],
+            "openai/gpt-4o": ["anthropic/claude-3.5-sonnet", "google/gemini-2.5-pro-preview"],
+            "openai/o1-mini": ["anthropic/claude-3.7-sonnet", "google/gemini-2.5-flash-preview"],
+            "openai/o1": ["anthropic/claude-opus-4", "openai/o1-mini"],
+            "openai/o1-pro": ["openai/o1", "anthropic/claude-opus-4"],
+            "openai/o3-mini": ["openai/o1-mini", "anthropic/claude-3.7-sonnet"],
+            
+            # Google models
+            "google/gemini-2.0-flash": ["anthropic/claude-3.5-haiku", "openai/gpt-4o-mini"],
+            "google/gemini-2.5-flash-preview": ["anthropic/claude-3.7-sonnet", "openai/o1-mini"],
+            "google/gemini-2.5-pro-preview": ["anthropic/claude-sonnet-4", "openai/gpt-4o"],
+            "google/gemma-3-27b-it": ["google/gemini-2.0-flash", "anthropic/claude-3.5-haiku"]
         }
-        return fallback_map.get(primary_model, [])
+        return fallback_map.get(primary_model, ["anthropic/claude-3.5-sonnet"])
     
     def _get_reasoning_requirements(self, complexity: str) -> str:
         """Map complexity to reasoning requirements."""
@@ -381,8 +399,13 @@ class MCPRepository:
         # Update cache
         self._update_cache(mcp)
     
-    def find_similar_mcps(self, task_context: str, similarity_threshold: float = 0.7) -> List[MCPSpecification]:
+    def find_similar_mcps(self, task_context: str, similarity_threshold: float = 0.7, use_semantic: bool = False) -> List[MCPSpecification]:
         """Find MCPs similar to the given task context using semantic similarity."""
+        
+        # Use fallback by default to avoid model download delays
+        if not use_semantic:
+            return self._find_similar_mcps_fallback(task_context)
+            
         try:
             from .similarity import SemanticSimilarityEngine
             

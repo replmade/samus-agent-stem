@@ -126,13 +126,16 @@ class MinimalAgentCore:
         # First, try direct reasoning
         solution = self.reasoning_engine.process(problem, context)
         
-        # Analyze if we need to generate and execute MCPs
-        mcp_needs = await self._analyze_mcp_needs(problem, solution)
-        
-        if mcp_needs:
-            # Generate and execute MCPs to enhance the solution
-            enhanced_solution = await self._execute_mcps(problem, solution, mcp_needs)
-            solution = enhanced_solution
+        # Analyze if we need to generate and execute MCPs (if enabled)
+        if self.config.enable_mcp_generation:
+            mcp_needs = await self._analyze_mcp_needs(problem, solution)
+            
+            if mcp_needs:
+                # Generate and execute MCPs to enhance the solution
+                enhanced_solution = await self._execute_mcps(problem, solution, mcp_needs)
+                solution = enhanced_solution
+        else:
+            solution.reasoning_trace.append("MCP generation disabled - using direct reasoning only")
         
         # Add interaction to context
         self.context_manager.add_interaction(problem, solution)
@@ -143,17 +146,25 @@ class MinimalAgentCore:
         """Analyze if MCPs are needed to enhance the solution."""
         
         # Use the reasoning engine to determine if MCPs are needed
-        analysis_prompt = f"""Given this problem and initial solution, determine if specialized MCPs are needed:
+        analysis_prompt = f"""Given this problem and initial solution, determine if the user is requesting actual executable MCP generation.
 
 Problem: {problem}
 
 Initial Solution: {solution.content}
 
-Should I generate specialized MCPs to enhance this solution? Consider:
-1. Does this require external data collection?
-2. Does this need specialized analysis capabilities?
-3. Would custom tools improve the solution quality?
-4. Are there repetitive tasks that could be automated?
+CRITICAL: Look for these indicators that the user wants executable MCP generation:
+1. Explicit words: "Generate", "Create", "Build" + "MCP server" 
+2. Executable requirements: "executable", "run immediately", "that I can run"
+3. File/code generation requests: "Python MCP server", "MCP implementation"
+4. NOT just asking for explanations, concepts, or descriptions
+
+If the user is requesting actual MCP generation/creation, you MUST set needs_mcps to true.
+
+Additional MCP considerations if needs_mcps is true:
+1. Does this require external API integration?
+2. Does this need specialized data processing capabilities?
+3. Would separate validation/caching MCPs improve reliability?
+4. Are there security/authentication requirements?
 
 Respond with JSON format:
 {{
@@ -191,7 +202,8 @@ Respond with JSON format:
         return []
     
     async def _execute_mcps(self, problem: str, solution: ProblemSolution, mcp_needs: List[str]) -> ProblemSolution:
-        """Execute MCPs to enhance the solution."""
+        """Execute MCPs to enhance the solution with timeout handling."""
+        import asyncio
         
         enhanced_content = solution.content
         mcps_used = []
@@ -199,14 +211,20 @@ Respond with JSON format:
         
         for mcp_requirement in mcp_needs:
             try:
-                # Generate or retrieve MCP for this requirement
-                mcp = await self.mcp_manager.get_or_create_mcp(mcp_requirement)
+                # Generate or retrieve MCP for this requirement with timeout
+                mcp = await asyncio.wait_for(
+                    self.mcp_manager.get_or_create_mcp(mcp_requirement),
+                    timeout=self.config.mcp_generation_timeout
+                )
                 
-                # Execute the MCP with the problem context
-                mcp_result = await self.mcp_manager.execute_mcp(
-                    mcp, 
-                    f"Problem: {problem}\nCurrent Solution: {enhanced_content}",
-                    {"requirement": mcp_requirement}
+                # Execute the MCP with the problem context with timeout
+                mcp_result = await asyncio.wait_for(
+                    self.mcp_manager.execute_mcp(
+                        mcp, 
+                        f"Problem: {problem}\nCurrent Solution: {enhanced_content}",
+                        {"requirement": mcp_requirement}
+                    ),
+                    timeout=self.config.mcp_execution_timeout
                 )
                 
                 if mcp_result["success"]:
@@ -232,8 +250,12 @@ Provide an enhanced, integrated solution:"""
                     mcps_used.append(mcp.mcp_id)
                     reasoning_trace.append(f"Enhanced with MCP: {mcp.name}")
                 
+            except asyncio.TimeoutError:
+                reasoning_trace.append(f"MCP generation/execution timed out for '{mcp_requirement}' - skipping")
+                print(f"Warning: MCP timeout for requirement: {mcp_requirement}")
             except Exception as e:
                 reasoning_trace.append(f"MCP execution failed for '{mcp_requirement}': {str(e)}")
+                print(f"Warning: MCP error for requirement: {mcp_requirement} - {str(e)}")
         
         return ProblemSolution(
             content=enhanced_content,
