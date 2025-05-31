@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This proposal outlines a comprehensive implementation plan for developing an Samus-inspired autonomous agent using Claude Sonnet 4 as the core reasoning engine. The implementation focuses on minimal predefinition and maximal self-evolution capabilities through dynamic Model Context Protocol (MCP) generation and management.
+This proposal outlines a comprehensive implementation plan for developing an Alita-inspired autonomous agent using Claude Sonnet 4 as the core reasoning engine. The implementation focuses on minimal predefinition and maximal self-evolution capabilities through dynamic Model Context Protocol (MCP) generation and management.
 
 ## Project Objectives
 
